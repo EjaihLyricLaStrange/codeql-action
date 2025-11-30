@@ -1,16 +1,23 @@
-import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 
 import * as actionsCache from "@actions/cache";
 
-import { getRequiredInput, getTemporaryDirectory } from "./actions-util";
+import {
+  getRequiredInput,
+  getTemporaryDirectory,
+  getWorkflowRunAttempt,
+  getWorkflowRunID,
+} from "./actions-util";
 import { getAutomationID } from "./api-client";
+import { createCacheKeyHash } from "./caching-utils";
 import { type CodeQL } from "./codeql";
 import { type Config } from "./config-utils";
 import { getCommitOid, getFileOidsUnderPath } from "./git-utils";
 import { Logger, withGroupAsync } from "./logging";
 import {
+  CleanupLevel,
+  getErrorMessage,
   isInTestMode,
   tryGetFolderBytes,
   waitForResultWithTimeLimit,
@@ -22,7 +29,7 @@ export enum OverlayDatabaseMode {
   None = "none",
 }
 
-export const CODEQL_OVERLAY_MINIMUM_VERSION = "2.22.4";
+export const CODEQL_OVERLAY_MINIMUM_VERSION = "2.23.5";
 
 /**
  * The maximum (uncompressed) size of the overlay base database that we will
@@ -34,15 +41,10 @@ export const CODEQL_OVERLAY_MINIMUM_VERSION = "2.22.4";
  * Actions Cache client library. Instead we place a limit on the uncompressed
  * size of the overlay-base database.
  *
- * Assuming 2.5:1 compression ratio, the 15 GB limit on uncompressed data would
- * translate to a limit of around 6 GB after compression. This is a high limit
- * compared to the default 10GB Actions Cache capacity, but enforcement of Actions
- * Cache quotas is not immediate.
- *
- * TODO: revisit this limit before removing the restriction for overlay analysis
- * to the `github` and `dsp-testing` orgs.
+ * Assuming 2.5:1 compression ratio, the 7.5 GB limit on uncompressed data would
+ * translate to a limit of around 3 GB after compression.
  */
-const OVERLAY_BASE_DATABASE_MAX_UPLOAD_SIZE_MB = 15000;
+const OVERLAY_BASE_DATABASE_MAX_UPLOAD_SIZE_MB = 7500;
 const OVERLAY_BASE_DATABASE_MAX_UPLOAD_SIZE_BYTES =
   OVERLAY_BASE_DATABASE_MAX_UPLOAD_SIZE_MB * 1_000_000;
 
@@ -174,7 +176,7 @@ const MAX_CACHE_OPERATION_MS = 600_000;
  * @param warningPrefix Prefix for the check failure warning message
  * @returns True if the verification succeeded, false otherwise
  */
-export function checkOverlayBaseDatabase(
+function checkOverlayBaseDatabase(
   config: Config,
   logger: Logger,
   warningPrefix: string,
@@ -203,7 +205,7 @@ export function checkOverlayBaseDatabase(
  * @returns A promise that resolves to true if the upload was performed and
  * successfully completed, or false otherwise
  */
-export async function uploadOverlayBaseDatabaseToCache(
+export async function cleanupAndUploadOverlayBaseDatabaseToCache(
   codeql: CodeQL,
   config: Config,
   logger: Logger,
@@ -241,7 +243,7 @@ export async function uploadOverlayBaseDatabaseToCache(
 
   // Clean up the database using the overlay cleanup level.
   await withGroupAsync("Cleaning up databases", async () => {
-    await codeql.databaseCleanupCluster(config, "overlay");
+    await codeql.databaseCleanupCluster(config, CleanupLevel.Overlay);
   });
 
   const dbLocation = config.dbLocation;
@@ -271,6 +273,7 @@ export async function uploadOverlayBaseDatabaseToCache(
     config,
     codeQlVersion,
     checkoutPath,
+    logger,
   );
   logger.info(
     `Uploading overlay-base database to Actions cache with key ${cacheSaveKey}`,
@@ -448,17 +451,28 @@ export async function downloadOverlayBaseDatabaseFromCache(
  * The key consists of the restore key prefix (which does not include the
  * commit SHA) and the commit SHA of the current checkout.
  */
-async function getCacheSaveKey(
+export async function getCacheSaveKey(
   config: Config,
   codeQlVersion: string,
   checkoutPath: string,
+  logger: Logger,
 ): Promise<string> {
+  let runId = 1;
+  let attemptId = 1;
+  try {
+    runId = getWorkflowRunID();
+    attemptId = getWorkflowRunAttempt();
+  } catch (e) {
+    logger.warning(
+      `Failed to get workflow run ID or attempt ID. Reason: ${getErrorMessage(e)}`,
+    );
+  }
   const sha = await getCommitOid(checkoutPath);
   const restoreKeyPrefix = await getCacheRestoreKeyPrefix(
     config,
     codeQlVersion,
   );
-  return `${restoreKeyPrefix}${sha}`;
+  return `${restoreKeyPrefix}${sha}-${runId}-${attemptId}`;
 }
 
 /**
@@ -475,7 +489,7 @@ async function getCacheSaveKey(
  * not include the commit SHA. This allows us to restore the most recent
  * compatible overlay-base database.
  */
-async function getCacheRestoreKeyPrefix(
+export async function getCacheRestoreKeyPrefix(
   config: Config,
   codeQlVersion: string,
 ): Promise<string> {
@@ -500,28 +514,4 @@ async function getCacheRestoreKeyPrefix(
   // componentsHash, but including them explicitly in the cache key makes it
   // easier to debug and understand the cache key structure.
   return `${CACHE_PREFIX}-${CACHE_VERSION}-${componentsHash}-${languages}-${codeQlVersion}-`;
-}
-
-/**
- * Creates a SHA-256 hash of the cache key components to ensure uniqueness
- * while keeping the cache key length manageable.
- *
- * @param components Object containing all components that should influence cache key uniqueness
- * @returns A short SHA-256 hash (first 16 characters) of the components
- */
-function createCacheKeyHash(components: Record<string, any>): string {
-  // From https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify
-  //
-  // "Properties are visited using the same algorithm as Object.keys(), which
-  // has a well-defined order and is stable across implementations. For example,
-  // JSON.stringify on the same object will always produce the same string, and
-  // JSON.parse(JSON.stringify(obj)) would produce an object with the same key
-  // ordering as the original (assuming the object is completely
-  // JSON-serializable)."
-  const componentsJson = JSON.stringify(components);
-  return crypto
-    .createHash("sha256")
-    .update(componentsJson)
-    .digest("hex")
-    .substring(0, 16);
 }

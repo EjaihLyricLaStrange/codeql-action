@@ -25,7 +25,7 @@ import {
   isCodeQualityEnabled,
   isCodeScanningEnabled,
 } from "./config-utils";
-import { uploadDatabases } from "./database-upload";
+import { cleanupAndUploadDatabases } from "./database-upload";
 import {
   DependencyCacheUploadStatusReport,
   uploadDependencyCaches,
@@ -35,7 +35,7 @@ import { EnvVar } from "./environment";
 import { Feature, Features } from "./feature-flags";
 import { KnownLanguage } from "./languages";
 import { getActionsLogger, Logger } from "./logging";
-import { uploadOverlayBaseDatabaseToCache } from "./overlay-database-utils";
+import { cleanupAndUploadOverlayBaseDatabaseToCache } from "./overlay-database-utils";
 import { getRepositoryNwo } from "./repository";
 import * as statusReport from "./status-report";
 import {
@@ -52,7 +52,7 @@ import {
 } from "./trap-caching";
 import * as uploadLib from "./upload-lib";
 import { UploadResult } from "./upload-lib";
-import { uploadSarif } from "./upload-sarif";
+import { postProcessAndUploadSarif } from "./upload-sarif";
 import * as util from "./util";
 
 interface AnalysisStatusReport
@@ -315,6 +315,7 @@ async function run() {
     await runAutobuildIfLegacyGoWorkflow(config, logger);
 
     dbCreationTimings = await runFinalize(
+      features,
       outputDir,
       threads,
       memory,
@@ -324,10 +325,16 @@ async function run() {
     );
 
     if (actionsUtil.getRequiredInput("skip-queries") !== "true") {
+      // Warn if the removed `add-snippets` input is used.
+      if (actionsUtil.getOptionalInput("add-snippets") !== undefined) {
+        logger.warning(
+          "The `add-snippets` input has been removed and no longer has any effect.",
+        );
+      }
+
       runStats = await runQueries(
         outputDir,
         memory,
-        util.getAddSnippetsFlag(actionsUtil.getRequiredInput("add-snippets")),
         threads,
         diffRangePackDir,
         actionsUtil.getOptionalInput("category"),
@@ -344,20 +351,24 @@ async function run() {
     }
     core.setOutput("db-locations", dbLocations);
     core.setOutput("sarif-output", path.resolve(outputDir));
-    const uploadInput = actionsUtil.getOptionalInput("upload");
-    if (runStats && actionsUtil.getUploadValue(uploadInput) === "always") {
+    const uploadKind = actionsUtil.getUploadValue(
+      actionsUtil.getOptionalInput("upload"),
+    );
+    if (runStats) {
       const checkoutPath = actionsUtil.getRequiredInput("checkout_path");
       const category = actionsUtil.getOptionalInput("category");
 
       if (await features.getValue(Feature.AnalyzeUseNewUpload)) {
-        uploadResults = await uploadSarif(
+        uploadResults = await postProcessAndUploadSarif(
           logger,
           features,
+          uploadKind,
           checkoutPath,
           outputDir,
           category,
+          actionsUtil.getOptionalInput("post-processed-sarif-path"),
         );
-      } else {
+      } else if (uploadKind === "always") {
         uploadResults = {};
 
         if (isCodeScanningEnabled(config)) {
@@ -383,6 +394,9 @@ async function run() {
               analyses.CodeQuality,
             );
         }
+      } else {
+        uploadResults = {};
+        logger.info("Not uploading results");
       }
 
       // Set the SARIF id outputs only if we have results for them, to avoid
@@ -404,12 +418,21 @@ async function run() {
     }
 
     // Possibly upload the overlay-base database to actions cache.
-    // If databases are to be uploaded, they will first be cleaned up at the overlay level.
-    await uploadOverlayBaseDatabaseToCache(codeql, config, logger);
+    // Note: Take care with the ordering of this call since databases may be cleaned up
+    // at the `overlay` level.
+    await cleanupAndUploadOverlayBaseDatabaseToCache(codeql, config, logger);
 
     // Possibly upload the database bundles for remote queries.
-    // If databases are to be uploaded, they will first be cleaned up at the clear level.
-    await uploadDatabases(repositoryNwo, codeql, config, apiDetails, logger);
+    // Note: Take care with the ordering of this call since databases may be cleaned up
+    // at the `overlay` or `clear` level.
+    await cleanupAndUploadDatabases(
+      repositoryNwo,
+      codeql,
+      config,
+      apiDetails,
+      features,
+      logger,
+    );
 
     // Possibly upload the TRAP caches for later re-use
     const trapCacheUploadStartTime = performance.now();
@@ -425,14 +448,11 @@ async function run() {
 
     // Store dependency cache(s) if dependency caching is enabled.
     if (shouldStoreCache(config.dependencyCachingEnabled)) {
-      const minimizeJavaJars = await features.getValue(
-        Feature.JavaMinimizeDependencyJars,
-        codeql,
-      );
       dependencyCacheResults = await uploadDependencyCaches(
+        codeql,
+        features,
         config,
         logger,
-        minimizeJavaJars,
       );
     }
 

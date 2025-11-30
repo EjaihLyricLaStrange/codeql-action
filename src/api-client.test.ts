@@ -169,4 +169,32 @@ test("wrapApiConfigurationError correctly wraps specific configuration errors", 
     res,
     new util.ConfigurationError("Resource not accessible by integration"),
   );
+
+  // Enablement errors.
+  const enablementErrorMessages = [
+    "Code Security must be enabled for this repository to use code scanning",
+    "Advanced Security must be enabled for this repository to use code scanning",
+    "Code Scanning is not enabled for this repository. Please enable code scanning in the repository settings.",
+  ];
+  const transforms = [
+    (msg: string) => msg,
+    (msg: string) => msg.toLowerCase(),
+    (msg: string) => msg.toLocaleUpperCase(),
+  ];
+
+  for (const enablementErrorMessage of enablementErrorMessages) {
+    for (const transform of transforms) {
+      const enablementError = new util.HTTPError(
+        transform(enablementErrorMessage),
+        403,
+      );
+      res = api.wrapApiConfigurationError(enablementError);
+      t.deepEqual(
+        res,
+        new util.ConfigurationError(
+          api.getFeatureEnablementError(enablementError.message),
+        ),
+      );
+    }
+  }
 });

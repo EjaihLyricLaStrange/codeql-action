@@ -6,6 +6,32 @@ See the [releases page](https://github.com/github/codeql-action/releases) for th
 
 No user facing changes.
 
+## 4.31.5 - 24 Nov 2025
+
+- Update default CodeQL bundle version to 2.23.6. [#3321](https://github.com/github/codeql-action/pull/3321)
+
+## 4.31.4 - 18 Nov 2025
+
+No user facing changes.
+
+## 4.31.3 - 13 Nov 2025
+
+- CodeQL Action v3 will be deprecated in December 2026.  The Action now logs a warning for customers who are running v3 but could be running v4. For more information, see [Upcoming deprecation of CodeQL Action v3](https://github.blog/changelog/2025-10-28-upcoming-deprecation-of-codeql-action-v3/).
+- Update default CodeQL bundle version to 2.23.5. [#3288](https://github.com/github/codeql-action/pull/3288)
+
+## 4.31.2 - 30 Oct 2025
+
+No user facing changes.
+
+## 4.31.1 - 30 Oct 2025
+
+- The `add-snippets` input has been removed from the `analyze` action. This input has been deprecated since CodeQL Action 3.26.4 in August 2024 when this removal was announced.
+
+## 4.31.0 - 24 Oct 2025
+
+- Bump minimum CodeQL bundle version to 2.17.6. [#3223](https://github.com/github/codeql-action/pull/3223)
+- When SARIF files are uploaded by the `analyze` or `upload-sarif` actions, the CodeQL Action automatically performs post-processing steps to prepare the data for the upload. Previously, these post-processing steps were only performed before an upload took place. We are now changing this so that the post-processing steps will always be performed, even when the SARIF files are not uploaded. This does not change anything for the `upload-sarif` action. For `analyze`, this may affect Advanced Setup for CodeQL users who specify a value other than `always` for the `upload` input. [#3222](https://github.com/github/codeql-action/pull/3222)
+
 ## 4.30.9 - 17 Oct 2025
 
 - Update default CodeQL bundle version to 2.23.3. [#3205](https://github.com/github/codeql-action/pull/3205)

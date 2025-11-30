@@ -54,7 +54,7 @@ export enum ActionName {
  * considered to be a third party analysis and is treated differently when calculating SLOs. To ensure
  * misconfigured workflows are not treated as third party, only the upload-sarif action can return false.
  */
-export function isFirstPartyAnalysis(actionName: ActionName): boolean {
+function isFirstPartyAnalysis(actionName: ActionName): boolean {
   if (actionName !== ActionName.UploadSarif) {
     return true;
   }
@@ -252,7 +252,7 @@ export interface EventReport {
  *
  * @param actionName The name of the action, e.g. 'init', 'finish', 'upload-sarif'
  * @param status The status. Must be 'success', 'failure', or 'starting'
- * @param startedAt The time this action started executing.
+ * @param actionStartedAt The time this action started executing.
  * @param cause  Cause of failure (only supply if status is 'failure')
  * @param exception Exception (only supply if status is 'failure')
  * @returns undefined if an exception was thrown.
@@ -387,9 +387,9 @@ export async function createStatusReportBase(
 }
 
 const OUT_OF_DATE_MSG =
-  "CodeQL Action is out-of-date. Please upgrade to the latest version of codeql-action.";
+  "CodeQL Action is out-of-date. Please upgrade to the latest version of `codeql-action`.";
 const INCOMPATIBLE_MSG =
-  "CodeQL Action version is incompatible with the code scanning endpoint. Please update to a compatible version of codeql-action.";
+  "CodeQL Action version is incompatible with the API endpoint. Please update to a compatible version of `codeql-action`.";
 
 /**
  * Send a status report to the code_scanning/analysis/status endpoint.
@@ -439,12 +439,16 @@ export async function sendStatusReport<S extends StatusReportBase>(
           ) {
             core.warning(
               'Workflows triggered by Dependabot on the "push" event run with read-only access. ' +
-                "Uploading Code Scanning results requires write access. " +
-                'To use Code Scanning with Dependabot, please ensure you are using the "pull_request" event for this workflow and avoid triggering on the "push" event for Dependabot branches. ' +
+                "Uploading CodeQL results requires write access. " +
+                'To use CodeQL with Dependabot, please ensure you are using the "pull_request" event for this workflow and avoid triggering on the "push" event for Dependabot branches. ' +
                 `See ${DocUrl.SCANNING_ON_PUSH} for more information on how to configure these events.`,
             );
           } else {
-            core.warning(httpError.message);
+            core.warning(
+              "This run of the CodeQL Action does not have permission to access the CodeQL Action API endpoints. " +
+                "This could be because the Action is running on a pull request from a fork. If not, " +
+                `please ensure the workflow has at least the 'security-events: read' permission. Details: ${httpError.message}`,
+            );
           }
           return;
         case 404:
@@ -466,7 +470,7 @@ export async function sendStatusReport<S extends StatusReportBase>(
     // something else has gone wrong and the request/response will be logged by octokit
     // it's possible this is a transient error and we should continue scanning
     core.warning(
-      `An unexpected error occurred when sending code scanning status report: ${getErrorMessage(
+      `An unexpected error occurred when sending a status report: ${getErrorMessage(
         e,
       )}`,
     );

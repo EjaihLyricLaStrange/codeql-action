@@ -24,7 +24,7 @@ defaults:
 
 jobs:
   merge-back:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     environment: Automation
     if: github.repository == 'github/codeql-action'
     env:
@@ -44,10 +44,13 @@ jobs:
           GITHUB_CONTEXT: '${{ toJson(github) }}'
         run: echo "${GITHUB_CONTEXT}"
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # ensure we have all tags and can push commits
       - uses: actions/setup-node@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Update git config
         run: |
@@ -139,7 +142,7 @@ jobs:
           token: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Generate token
-        uses: actions/create-github-app-token@v2.1.4
+        uses: actions/create-github-app-token@v2.2.0
         id: app-token
         with:
           app-id: ${{ vars.AUTOMATION_APP_ID }}

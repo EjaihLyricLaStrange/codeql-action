@@ -101,16 +101,6 @@ test("getMemoryFlag() throws if the ram input is < 0 or NaN", async (t) => {
   }
 });
 
-test("getAddSnippetsFlag() should return the correct flag", (t) => {
-  t.deepEqual(util.getAddSnippetsFlag(true), "--sarif-add-snippets");
-  t.deepEqual(util.getAddSnippetsFlag("true"), "--sarif-add-snippets");
-
-  t.deepEqual(util.getAddSnippetsFlag(false), "--no-sarif-add-snippets");
-  t.deepEqual(util.getAddSnippetsFlag(undefined), "--no-sarif-add-snippets");
-  t.deepEqual(util.getAddSnippetsFlag("false"), "--no-sarif-add-snippets");
-  t.deepEqual(util.getAddSnippetsFlag("foo bar"), "--no-sarif-add-snippets");
-});
-
 test("getThreadsFlag() should return the correct --threads flag", (t) => {
   const numCpus = os.cpus().length;
 
@@ -250,6 +240,35 @@ test("allowed API versions", async (t) => {
     util.apiVersionInRange("2.1.0", "1.33", "2.0"),
     util.DisallowedAPIVersionReason.ACTION_TOO_OLD,
   );
+});
+
+test("getRequiredEnvParam - gets environment variables", (t) => {
+  process.env.SOME_UNIT_TEST_VAR = "foo";
+  const result = util.getRequiredEnvParam("SOME_UNIT_TEST_VAR");
+  t.is(result, "foo");
+});
+
+test("getRequiredEnvParam - throws if an environment variable isn't set", (t) => {
+  t.throws(() => util.getRequiredEnvParam("SOME_UNIT_TEST_VAR"));
+});
+
+test("getOptionalEnvVar - gets environment variables", (t) => {
+  process.env.SOME_UNIT_TEST_VAR = "foo";
+  const result = util.getOptionalEnvVar("SOME_UNIT_TEST_VAR");
+  t.is(result, "foo");
+});
+
+test("getOptionalEnvVar - gets undefined for empty environment variables", (t) => {
+  process.env.SOME_UNIT_TEST_VAR = "";
+  const result = util.getOptionalEnvVar("SOME_UNIT_TEST_VAR");
+  t.is(result, undefined);
+});
+
+test("getOptionalEnvVar - doesn't throw for undefined environment variables", (t) => {
+  t.notThrows(() => {
+    const result = util.getOptionalEnvVar("SOME_UNIT_TEST_VAR");
+    t.is(result, undefined);
+  });
 });
 
 test("doesDirectoryExist", async (t) => {
@@ -428,13 +447,21 @@ const CHECK_ACTION_VERSION_TESTS: Array<[string, util.GitHubVersion, boolean]> =
     ["2.2.1", { type: util.GitHubVariant.DOTCOM }, true],
     ["2.2.1", { type: util.GitHubVariant.GHE_DOTCOM }, true],
     ["2.2.1", { type: util.GitHubVariant.GHES, version: "3.10" }, false],
-    ["2.2.1", { type: util.GitHubVariant.GHES, version: "3.11" }, true],
-    ["2.2.1", { type: util.GitHubVariant.GHES, version: "3.12" }, true],
-    ["3.2.1", { type: util.GitHubVariant.DOTCOM }, false],
-    ["3.2.1", { type: util.GitHubVariant.GHE_DOTCOM }, false],
+    ["2.2.1", { type: util.GitHubVariant.GHES, version: "3.11" }, false],
+    ["2.2.1", { type: util.GitHubVariant.GHES, version: "3.12" }, false],
+    ["3.2.1", { type: util.GitHubVariant.DOTCOM }, true],
+    ["3.2.1", { type: util.GitHubVariant.GHE_DOTCOM }, true],
     ["3.2.1", { type: util.GitHubVariant.GHES, version: "3.10" }, false],
     ["3.2.1", { type: util.GitHubVariant.GHES, version: "3.11" }, false],
     ["3.2.1", { type: util.GitHubVariant.GHES, version: "3.12" }, false],
+    ["3.2.1", { type: util.GitHubVariant.GHES, version: "3.19" }, false],
+    ["3.2.1", { type: util.GitHubVariant.GHES, version: "3.20" }, true],
+    ["3.2.1", { type: util.GitHubVariant.GHES, version: "3.21" }, true],
+    ["4.2.1", { type: util.GitHubVariant.DOTCOM }, false],
+    ["4.2.1", { type: util.GitHubVariant.GHE_DOTCOM }, false],
+    ["4.2.1", { type: util.GitHubVariant.GHES, version: "3.19" }, false],
+    ["4.2.1", { type: util.GitHubVariant.GHES, version: "3.20" }, false],
+    ["4.2.1", { type: util.GitHubVariant.GHES, version: "3.21" }, false],
   ];
 
 for (const [
@@ -449,7 +476,7 @@ for (const [
     githubVersion,
   )}`;
   test(`checkActionVersion ${reportErrorDescription} for ${versionsDescription}`, async (t) => {
-    const warningSpy = sinon.spy(core, "error");
+    const warningSpy = sinon.spy(core, "warning");
     const versionStub = sinon
       .stub(api, "getGitHubVersion")
       .resolves(githubVersion);
@@ -461,9 +488,7 @@ for (const [
     if (shouldReportError) {
       t.true(
         warningSpy.calledOnceWithExactly(
-          sinon.match(
-            "CodeQL Action major versions v1 and v2 have been deprecated.",
-          ),
+          sinon.match("CodeQL Action v3 will be deprecated in December 2026."),
         ),
       );
     } else {
@@ -504,4 +529,13 @@ test("getCgroupCpuCountFromCpus returns undefined if the CPU file exists but is 
       undefined,
     );
   });
+});
+
+test("checkDiskUsage succeeds and produces positive numbers", async (t) => {
+  process.env["GITHUB_WORKSPACE"] = os.tmpdir();
+  const diskUsage = await util.checkDiskUsage(getRunnerLogger(true));
+  if (t.truthy(diskUsage)) {
+    t.true(diskUsage.numAvailableBytes > 0);
+    t.true(diskUsage.numTotalBytes > 0);
+  }
 });

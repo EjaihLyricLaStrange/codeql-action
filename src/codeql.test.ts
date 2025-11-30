@@ -5,7 +5,6 @@ import * as toolrunner from "@actions/exec/lib/toolrunner";
 import * as io from "@actions/io";
 import * as toolcache from "@actions/tool-cache";
 import test, { ExecutionContext } from "ava";
-import * as del from "del";
 import * as yaml from "js-yaml";
 import nock from "nock";
 import * as sinon from "sinon";
@@ -36,7 +35,6 @@ import {
   createTestConfig,
 } from "./testing-utils";
 import { ToolsDownloadStatusReport } from "./tools-download";
-import { ToolsFeature } from "./tools-features";
 import * as util from "./util";
 import { initializeEnvironment } from "./util";
 
@@ -558,7 +556,7 @@ const injectedConfigMacro = test.macro({
       const augmentedConfig = yaml.load(fs.readFileSync(configFile, "utf8"));
       t.deepEqual(augmentedConfig, expectedConfig);
 
-      await del.deleteAsync(configFile, { force: true });
+      await fs.promises.rm(configFile, { force: true });
     });
   },
 
@@ -870,84 +868,6 @@ test("does not pass a qlconfig to the CLI when it is undefined", async (t: Execu
   });
 });
 
-const NEW_ANALYSIS_SUMMARY_TEST_CASES = [
-  {
-    codeqlVersion: makeVersionInfo("2.15.0", {
-      [ToolsFeature.AnalysisSummaryV2IsDefault]: true,
-    }),
-    githubVersion: {
-      type: util.GitHubVariant.DOTCOM,
-    },
-    flagPassed: false,
-    negativeFlagPassed: false,
-  },
-  {
-    codeqlVersion: makeVersionInfo("2.15.0"),
-    githubVersion: {
-      type: util.GitHubVariant.DOTCOM,
-    },
-    flagPassed: true,
-    negativeFlagPassed: false,
-  },
-  {
-    codeqlVersion: makeVersionInfo("2.15.0"),
-    githubVersion: {
-      type: util.GitHubVariant.GHES,
-      version: "3.10.0",
-    },
-    flagPassed: true,
-    negativeFlagPassed: false,
-  },
-];
-
-for (const {
-  codeqlVersion,
-  flagPassed,
-  githubVersion,
-  negativeFlagPassed,
-} of NEW_ANALYSIS_SUMMARY_TEST_CASES) {
-  test(`database interpret-results passes ${
-    flagPassed
-      ? "--new-analysis-summary"
-      : negativeFlagPassed
-        ? "--no-new-analysis-summary"
-        : "nothing"
-  } for CodeQL version ${JSON.stringify(codeqlVersion)} and ${
-    util.GitHubVariant[githubVersion.type]
-  } ${githubVersion.version ? ` ${githubVersion.version}` : ""}`, async (t) => {
-    const runnerConstructorStub = stubToolRunnerConstructor();
-    const codeqlObject = await codeql.getCodeQLForTesting();
-    sinon.stub(codeqlObject, "getVersion").resolves(codeqlVersion);
-    // io throws because of the test CodeQL object.
-    sinon.stub(io, "which").resolves("");
-    await codeqlObject.databaseInterpretResults(
-      "",
-      [],
-      "",
-      "",
-      "",
-      "-v",
-      undefined,
-      "",
-      Object.assign({}, stubConfig, { gitHubVersion: githubVersion }),
-      createFeatures([]),
-    );
-    const actualArgs = runnerConstructorStub.firstCall.args[1] as string[];
-    t.is(
-      actualArgs.includes("--new-analysis-summary"),
-      flagPassed,
-      `--new-analysis-summary should${flagPassed ? "" : "n't"} be passed`,
-    );
-    t.is(
-      actualArgs.includes("--no-new-analysis-summary"),
-      negativeFlagPassed,
-      `--no-new-analysis-summary should${
-        negativeFlagPassed ? "" : "n't"
-      } be passed`,
-    );
-  });
-}
-
 test("runTool summarizes several fatal errors", async (t) => {
   const heapError =
     "A fatal error occurred: Evaluator heap must be at least 384.00 MiB";
@@ -1125,7 +1045,7 @@ test("Avoids duplicating --overwrite flag if specified in CODEQL_ACTION_EXTRA_OP
   );
   t.truthy(configArg, "Should have injected a codescanning config");
   const configFile = configArg!.split("=")[1];
-  await del.deleteAsync(configFile, { force: true });
+  await fs.promises.rm(configFile, { force: true });
 });
 
 export function stubToolRunnerConstructor(

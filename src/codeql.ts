@@ -35,7 +35,7 @@ import { ToolsDownloadStatusReport } from "./tools-download";
 import { ToolsFeature, isSupportedToolsFeature } from "./tools-features";
 import { shouldEnableIndirectTracing } from "./tracer-config";
 import * as util from "./util";
-import { BuildMode, getErrorMessage } from "./util";
+import { BuildMode, CleanupLevel, getErrorMessage } from "./util";
 
 type Options = Array<string | number | boolean>;
 
@@ -141,7 +141,10 @@ export interface CodeQL {
   /**
    * Clean up all the databases within a database cluster.
    */
-  databaseCleanupCluster(config: Config, cleanupLevel: string): Promise<void>;
+  databaseCleanupCluster(
+    config: Config,
+    cleanupLevel: CleanupLevel,
+  ): Promise<void>;
   /**
    * Run 'codeql database bundle'.
    */
@@ -167,7 +170,6 @@ export interface CodeQL {
     databasePath: string,
     querySuitePaths: string[] | undefined,
     sarifFile: string,
-    addSnippetsFlag: string,
     threadsFlag: string,
     verbosityFlag: string | undefined,
     sarifRunPropertyFlag: string | undefined,
@@ -267,7 +269,7 @@ let cachedCodeQL: CodeQL | undefined = undefined;
  * The version flags below can be used to conditionally enable certain features
  * on versions newer than this.
  */
-const CODEQL_MINIMUM_VERSION = "2.16.6";
+const CODEQL_MINIMUM_VERSION = "2.17.6";
 
 /**
  * This version will shortly become the oldest version of CodeQL that the Action will run with.
@@ -514,7 +516,7 @@ export async function getCodeQLForTesting(
  *        version requirement. Must be set to true outside tests.
  * @returns A new CodeQL object
  */
-export async function getCodeQLForCmd(
+async function getCodeQLForCmd(
   cmd: string,
   checkVersion: boolean,
 ): Promise<CodeQL> {
@@ -817,7 +819,6 @@ export async function getCodeQLForCmd(
       databasePath: string,
       querySuitePaths: string[] | undefined,
       sarifFile: string,
-      addSnippetsFlag: string,
       threadsFlag: string,
       verbosityFlag: string,
       sarifRunPropertyFlag: string | undefined,
@@ -836,7 +837,6 @@ export async function getCodeQLForCmd(
         "--format=sarif-latest",
         verbosityFlag,
         `--output=${sarifFile}`,
-        addSnippetsFlag,
         "--print-diagnostics-summary",
         "--print-metrics-summary",
         "--sarif-add-baseline-file-info",
@@ -860,14 +860,6 @@ export async function getCodeQLForCmd(
       } else {
         codeqlArgs.push("--no-sarif-include-diagnostics");
       }
-      if (
-        !isSupportedToolsFeature(
-          await this.getVersion(),
-          ToolsFeature.AnalysisSummaryV2IsDefault,
-        )
-      ) {
-        codeqlArgs.push("--new-analysis-summary");
-      }
       codeqlArgs.push(databasePath);
       if (querySuitePaths) {
         codeqlArgs.push(...querySuitePaths);
@@ -889,7 +881,7 @@ export async function getCodeQLForCmd(
     },
     async databaseCleanupCluster(
       config: Config,
-      cleanupLevel: string,
+      cleanupLevel: CleanupLevel,
     ): Promise<void> {
       const cacheCleanupFlag = (await util.codeQlVersionAtLeast(
         this,
@@ -1082,8 +1074,11 @@ export async function getCodeQLForCmd(
 /**
  * Gets the options for `path` of `options` as an array of extra option strings.
  *
- * @param ignoringOptions Options that should be ignored, for example because they have already
- *                        been passed and it is an error to pass them more than once.
+ * @param paths The CLI command components to get extra options for.
+ * @param args Additional arguments for this function.
+ * @param args.ignoringOptions
+ *   Options that should be ignored, for example because they have already
+ *   been passed and it is an error to pass them more than once.
  */
 function getExtraOptionsFromEnv(
   paths: string[],
@@ -1165,8 +1160,9 @@ async function runCli(
 /**
  * Writes the code scanning configuration that is to be used by the CLI.
  *
- * @param codeql The CodeQL object to use.
- * @param config The CodeQL Action state to use.
+ * @param config The CodeQL Action state to write.
+ * @param logger The logger to use.
+ *
  * @returns The path to the generated user configuration file.
  */
 async function writeCodeScanningConfigFile(
@@ -1229,7 +1225,7 @@ export async function getTrapCachingExtractorConfigArgsForLang(
  *
  * This will not exist if the configuration is being parsed in the Action.
  */
-export function getGeneratedCodeScanningConfigPath(config: Config): string {
+function getGeneratedCodeScanningConfigPath(config: Config): string {
   return path.resolve(config.tempDir, "user-config.yaml");
 }
 

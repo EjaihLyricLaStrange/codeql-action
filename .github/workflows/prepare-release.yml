@@ -29,7 +29,7 @@ defaults:
 jobs:
   prepare:
     name: "Prepare release"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     if: github.repository == 'github/codeql-action'
 
     permissions:
@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0 # Need full history for calculation of diffs
 
