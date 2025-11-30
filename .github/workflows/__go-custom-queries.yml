@@ -95,5 +95,5 @@ jobs:
         run: ./build.sh
       - uses: ./../action/analyze
     env:
-      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'true'
       CODEQL_ACTION_TEST_MODE: true
